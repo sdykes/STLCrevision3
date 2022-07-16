@@ -1,0 +1,57 @@
+Defect,Category
+Scald,direct
+Shrivel,direct
+Stem end browning,direct
+Bird Damage,independent
+Blotch,independent
+Elongated ,independent
+Export fruit,independent
+Hail,independent
+Insect Damage,independent
+Leaves,independent
+Low Colour,independent
+Misshapen,independent
+Noctuid Damage,independent
+Over Size,independent
+Parrot Beak,independent
+Russet,independent
+Scarf Skin,independent
+Spray Residue,independentContinued
+Stem Tear,independentContinued
+Sting,independentContinued
+Sunburn,independentContinued
+Surfaces Deposits,independentContinued
+Tree Damage,independentContinued
+Under Size,independentContinued
+Variety Mark,independentContinued
+Wrong Variety ,independentContinued
+Alternaria ,indirect
+Black Rot ,indirect
+Black Spot,indirect
+Blemish Cosmetic,indirect
+Blue mould (penicilin),indirect
+Bronze Beetle Damage,indirect
+Bruise (fresh),indirect
+Bruise (OLD),indirect
+Calyx Split,indirect
+Cracking,indirect
+Cuts,indirect
+Dry Botrytis,indirect
+Eye Rot/Canker rot ,indirect
+Frost Damage,indirect
+Glomerella  (Bitter Rot),indirect
+Grey mould (Botrytis),indirectContinued
+Lenticle Breakdown,indirectContinued
+Lenticle Burn,indirectContinued
+Lenticle Spot,indirectContinued
+Major Bruise (spoilt),indirectContinued
+N.Alba,indirectContinued
+Over Maturity,indirectContinued
+Phytophthora ,indirectContinued
+Pit,indirectContinued
+Puncture,indirectContinued
+Rose Weevil Damage ,indirectContinued
+Rot (Botrytis),indirectContinued
+Stem End Rot,indirectContinued
+Stem Split,indirectContinued
+WHITE ROT,indirectContinued

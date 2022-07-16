@@ -1,0 +1,1008 @@
+<!DOCTYPE html>
+<html lang="" xml:lang="">
+  <head>
+    <title>Storage Loss Compensation</title>
+    <meta charset="utf-8" />
+    <meta name="author" content="Stuart Dykes" />
+    <meta name="date" content="2022-07-16" />
+    <script src="STLCRev3.5_files/header-attrs/header-attrs.js"></script>
+    <script src="STLCRev3.5_files/kePrint/kePrint.js"></script>
+    <link href="STLCRev3.5_files/lightable/lightable.css" rel="stylesheet" />
+    <link rel="stylesheet" href="rockit_style.css" type="text/css" />
+  </head>
+  <body>
+    <textarea id="source">
+
+
+class: title-slide-custom
+
+# Storage Loss
+## Analysis and recomendations
+### Stuart Dykes
+#### 2022-07-16
+
+---
+
+
+
+<div>
+<style type="text/css">.xaringan-extra-logo {
+width: 110px;
+height: 128px;
+z-index: 0;
+background-image: url(images/Rockit5.png);
+background-size: contain;
+background-repeat: no-repeat;
+position: absolute;
+right:20px;bottom:-90px;
+}
+</style>
+<script>(function () {
+  let tries = 0
+  function addLogo () {
+    if (typeof slideshow === 'undefined') {
+      tries += 1
+      if (tries < 10) {
+        setTimeout(addLogo, 100)
+      }
+    } else {
+      document.querySelectorAll('.remark-slide-content:not(.title-slide-custom):not(.inverse-custom):not(.hide_logo)')
+        .forEach(function (slide) {
+          const logo = document.createElement('div')
+          logo.classList = 'xaringan-extra-logo'
+          logo.href = null
+          slide.appendChild(logo)
+        })
+    }
+  }
+  document.addEventListener('DOMContentLoaded', addLogo)
+})()</script>
+</div>
+
+## Introduction 
+
+- Need to find a fair method of compensating growers for actual storage loss
+- Problem is complex and multi-factorial
+- Previous attempts to use gross-loss have tended to also capture loss not related to storage
+- Current approach is to analyse each defect/disorder in terms of trajectory during storage time
+- The effect of ESP and Harvest Date specifically have been accounted for in the model
+
+---
+
+
+
+
+
+
+## Extent of storage days 
+
+&lt;table class=" lightable-classic-2 table" style='font-family: "Arial Narrow", "Source Sans Pro", sans-serif; margin-left: auto; margin-right: auto; width: auto !important; margin-left: auto; margin-right: auto;'&gt;
+&lt;caption&gt;Summary of Rockit storage 2018 - 2022 (YTD)&lt;/caption&gt;
+ &lt;thead&gt;
+  &lt;tr&gt;
+   &lt;th style="text-align:left;"&gt; season &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; packing start &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; first CA &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; last CA &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; CA min storage days &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; CA packing days &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; packing start to first CA &lt;/th&gt;
+  &lt;/tr&gt;
+ &lt;/thead&gt;
+&lt;tbody&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;width: 2em; "&gt; 2018 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 9em; "&gt; 2018-03-01 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 9em; "&gt; 2018-07-09 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 9em; "&gt; 2018-08-03 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 4em; "&gt; 121 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 4em; "&gt; 25 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 4em; "&gt; 130 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;width: 2em; "&gt; 2019 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 9em; "&gt; 2019-03-04 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 9em; "&gt; 2019-07-16 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 9em; "&gt; 2019-10-01 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 4em; "&gt; 127 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 4em; "&gt; 77 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 4em; "&gt; 134 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;width: 2em; "&gt; 2020 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 9em; "&gt; 2020-03-02 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 9em; "&gt; 2020-08-11 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 9em; "&gt; 2020-09-25 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 4em; "&gt; 150 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 4em; "&gt; 45 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 4em; "&gt; 162 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;width: 2em; "&gt; 2021 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 9em; "&gt; 2021-03-01 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 9em; "&gt; 2021-08-16 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 9em; "&gt; 2021-10-01 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 4em; "&gt; 159 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 4em; "&gt; 46 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 4em; "&gt; 168 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;width: 2em; "&gt; 2022 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 9em; "&gt; 2022-02-21 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 9em; "&gt; 2022-06-27 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 9em; "&gt; 2022-07-15 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 4em; "&gt; 77 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 4em; "&gt; 18 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 4em; "&gt; 126 &lt;/td&gt;
+  &lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+
+---
+
+## Pack-out performance 
+
+&lt;table class=" lightable-classic-2 table" style='font-family: "Arial Narrow", "Source Sans Pro", sans-serif; margin-left: auto; margin-right: auto; width: auto !important; margin-left: auto; margin-right: auto;'&gt;
+ &lt;thead&gt;
+&lt;tr&gt;
+&lt;th style="empty-cells: hide;" colspan="1"&gt;&lt;/th&gt;
+&lt;th style="padding-bottom:0; padding-left:3px;padding-right:3px;text-align: center; " colspan="3"&gt;&lt;div style="border-bottom: 1px solid #111111; margin-bottom: -1px; "&gt;pack-out&lt;/div&gt;&lt;/th&gt;
+&lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;th style="text-align:left;"&gt; season &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; CA &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; RA &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; mean uplift &lt;/th&gt;
+  &lt;/tr&gt;
+ &lt;/thead&gt;
+&lt;tbody&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;width: 2em; "&gt; 2018 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 4em; "&gt; 74.96% &lt;/td&gt;
+   &lt;td style="text-align:right;width: 4em; "&gt; 69.79% &lt;/td&gt;
+   &lt;td style="text-align:right;width: 4em; "&gt; 5.17% &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;width: 2em; "&gt; 2019 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 4em; "&gt; 79.27% &lt;/td&gt;
+   &lt;td style="text-align:right;width: 4em; "&gt; 79.57% &lt;/td&gt;
+   &lt;td style="text-align:right;width: 4em; "&gt; -0.30% &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;width: 2em; "&gt; 2020 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 4em; "&gt; 73.79% &lt;/td&gt;
+   &lt;td style="text-align:right;width: 4em; "&gt; 69.73% &lt;/td&gt;
+   &lt;td style="text-align:right;width: 4em; "&gt; 4.06% &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;width: 2em; "&gt; 2021 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 4em; "&gt; 70.23% &lt;/td&gt;
+   &lt;td style="text-align:right;width: 4em; "&gt; 70.34% &lt;/td&gt;
+   &lt;td style="text-align:right;width: 4em; "&gt; -0.10% &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;width: 2em; "&gt; 2022 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 4em; "&gt; 57.79% &lt;/td&gt;
+   &lt;td style="text-align:right;width: 4em; "&gt; 69.03% &lt;/td&gt;
+   &lt;td style="text-align:right;width: 4em; "&gt; -11.24% &lt;/td&gt;
+  &lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+
+---
+
+## Calculated uplift 
+
+&lt;table class=" lightable-classic-2 table" style='font-family: "Arial Narrow", "Source Sans Pro", sans-serif; margin-left: auto; margin-right: auto; width: auto !important; margin-left: auto; margin-right: auto;border-bottom: 0;'&gt;
+ &lt;thead&gt;
+&lt;tr&gt;
+&lt;th style="empty-cells: hide;" colspan="1"&gt;&lt;/th&gt;
+&lt;th style="padding-bottom:0; padding-left:3px;padding-right:3px;text-align: center; " colspan="5"&gt;&lt;div style="border-bottom: 1px solid #111111; margin-bottom: -1px; "&gt;regression coefficients&lt;/div&gt;&lt;/th&gt;
+&lt;th style="empty-cells: hide;" colspan="1"&gt;&lt;/th&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;th style="empty-cells: hide;" colspan="1"&gt;&lt;/th&gt;
+&lt;th style="padding-bottom:0; padding-left:3px;padding-right:3px;text-align: center; " colspan="3"&gt;&lt;div style="border-bottom: 1px solid #111111; margin-bottom: -1px; "&gt;RA&lt;/div&gt;&lt;/th&gt;
+&lt;th style="padding-bottom:0; padding-left:3px;padding-right:3px;text-align: center; " colspan="2"&gt;&lt;div style="border-bottom: 1px solid #111111; margin-bottom: -1px; "&gt;CA&lt;/div&gt;&lt;/th&gt;
+&lt;th style="empty-cells: hide;" colspan="1"&gt;&lt;/th&gt;
+&lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;th style="text-align:left;"&gt; season &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; `\(\alpha\)` &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; `\(\beta\)` &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; `\(\theta\)` &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; `\(m\)` &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; `\(\mu\)` &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; uplift &lt;/th&gt;
+  &lt;/tr&gt;
+ &lt;/thead&gt;
+&lt;tbody&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;width: 1em; "&gt; 2018 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 3em; "&gt; 22.69% &lt;/td&gt;
+   &lt;td style="text-align:right;width: 3em; "&gt; -0.053 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 3em; "&gt; 63.56% &lt;/td&gt;
+   &lt;td style="text-align:right;width: 3em; "&gt; -3.01% &lt;/td&gt;
+   &lt;td style="text-align:right;width: 3em; "&gt; 0.750 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 3em; "&gt; 11.40% &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;width: 1em; "&gt; 2019 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 3em; "&gt; 21.29% &lt;/td&gt;
+   &lt;td style="text-align:right;width: 3em; "&gt; -0.112 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 3em; "&gt; 76.92% &lt;/td&gt;
+   &lt;td style="text-align:right;width: 3em; "&gt; -1.45% &lt;/td&gt;
+   &lt;td style="text-align:right;width: 3em; "&gt; 0.793 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 3em; "&gt; 2.35% &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;width: 1em; "&gt; 2020 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 3em; "&gt; 26.29% &lt;/td&gt;
+   &lt;td style="text-align:right;width: 3em; "&gt; -0.105 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 3em; "&gt; 67.69% &lt;/td&gt;
+   &lt;td style="text-align:right;width: 3em; "&gt; -5.27% &lt;/td&gt;
+   &lt;td style="text-align:right;width: 3em; "&gt; 0.738 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 3em; "&gt; 6.09% &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;width: 1em; "&gt; 2021 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 3em; "&gt; 53.14% &lt;/td&gt;
+   &lt;td style="text-align:right;width: 3em; "&gt; -0.140 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 3em; "&gt; 68.54% &lt;/td&gt;
+   &lt;td style="text-align:right;width: 3em; "&gt; 2.80% &lt;/td&gt;
+   &lt;td style="text-align:right;width: 3em; "&gt; 0.702 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 3em; "&gt; 1.70% &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;width: 1em; "&gt; 2022 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 3em; "&gt; 18.92% &lt;/td&gt;
+   &lt;td style="text-align:right;width: 3em; "&gt; -0.034 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 3em; "&gt; 61.34% &lt;/td&gt;
+   &lt;td style="text-align:right;width: 3em; "&gt; 13.19% &lt;/td&gt;
+   &lt;td style="text-align:right;width: 3em; "&gt; 0.578 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 3em; "&gt; -3.55% &lt;/td&gt;
+  &lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;tfoot&gt;&lt;tr&gt;&lt;td style="padding: 0; " colspan="100%"&gt;
+&lt;sup&gt;a&lt;/sup&gt; `\(m\)` = slope in pack-out % per day. Note the none of the slopes were significant meaning that the hypothesis that the slopes are all zero (i.e. CA PO is constant) cannot be rejected&lt;br&gt; &lt;sup&gt;b&lt;/sup&gt; `\(\mu\)` = the mean packout for all the CA batches from that season&lt;br&gt; &lt;sup&gt;c&lt;/sup&gt; uplift = actual uplift, calculated as mean CA packout ($\mu$) - `\(\theta\)`&lt;/td&gt;&lt;/tr&gt;&lt;/tfoot&gt;
+&lt;/table&gt;
+
+---
+
+## Pack-out behaviour 
+
+.pull-left[
+
+&lt;img src="STLCRev3.5_files/figure-html/packoutPlot-1.png" width="90%" style="display: block; margin: auto;" /&gt;
+]
+
+.pull-right[
+
+### Modeled pack-out 
+
+The pack-out can be modeled using a first order rate equation of the form
+
+`$$E[PO_i|SD_i] = {\alpha}e^{{\beta}SD_i} + \theta$$`  
+
+where:  
+
+`\(E[PO_i|SD_i]\)` = conditional estimate of pack-out given the `\(i^{th}\)` storage day    
+`\(\alpha\)` = constant, `\(\alpha + \theta\)` = initial pack-out at storage day zero  
+`\(\beta\)` = regression coefficient (rate constant)  
+`\(\theta\)` =  "steady state" pack-out  
+]
+---
+
+## Examination of individual defects
+
+- Curves above are the aggregation of individual defects
+- Approach then is to examine the behaviour of individual defects as a function of storage time and storage type (i.e. RA or CA)
+- Defects fall into three categories: directly related to storage, indirectly related to storage and independent of storage
+- Shrivel is directly related to time in storage, undersize is independent, old bruising appears to be indirectly related.
+
+---
+
+## Classification of defects 
+
+&lt;table class="table" style="font-size: 10px; margin-left: auto; margin-right: auto;"&gt;
+ &lt;thead&gt;
+  &lt;tr&gt;
+   &lt;th style="text-align:left;"&gt; direct &lt;/th&gt;
+   &lt;th style="text-align:left;"&gt; indirect &lt;/th&gt;
+   &lt;th style="text-align:left;"&gt; indirect cont'd &lt;/th&gt;
+   &lt;th style="text-align:left;"&gt; independent &lt;/th&gt;
+   &lt;th style="text-align:left;"&gt; independent cont'd &lt;/th&gt;
+  &lt;/tr&gt;
+ &lt;/thead&gt;
+&lt;tbody&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Scald &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Alternaria &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Grey mould (Botrytis) &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Bird Damage &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Spray Residue &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Shrivel &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Black Rot &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Lenticle Breakdown &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Blotch &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Stem Tear &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Stem end browning &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Black Spot &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Lenticle Burn &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Elongated &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Sting &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt;  &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Blemish Cosmetic &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Lenticle Spot &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Export fruit &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Sunburn &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt;  &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Blue mould (penicilin) &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Major Bruise (spoilt) &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Hail &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Surfaces Deposits &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt;  &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Bronze Beetle Damage &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; N.Alba &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Insect Damage &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Tree Damage &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt;  &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Bruise (fresh) &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Over Maturity &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Leaves &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Under Size &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt;  &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Bruise (OLD) &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Phytophthora &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Low Colour &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Variety Mark &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt;  &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Calyx Split &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Pit &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Misshapen &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Wrong Variety &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt;  &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Cracking &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Puncture &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Noctuid Damage &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt;  &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt;  &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Cuts &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Rose Weevil Damage &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Over Size &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt;  &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt;  &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Dry Botrytis &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Rot (Botrytis) &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Parrot Beak &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt;  &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt;  &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Eye Rot/Canker rot &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Stem End Rot &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Russet &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt;  &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt;  &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Frost Damage &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Stem Split &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; Scarf Skin &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt;  &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt;  &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt;  &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; WHITE ROT &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt;  &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt;  &lt;/td&gt;
+  &lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+
+
+
+
+---
+
+## Old Bruising vs storage days
+
+&lt;img src="STLCRev3.5_files/figure-html/old bruising-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Old Bruising vs harvest day
+
+&lt;img src="STLCRev3.5_files/figure-html/oldBruisingHD-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Puncture vs storage days
+
+&lt;img src="STLCRev3.5_files/figure-html/puncture-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Puncture vs harvest day
+
+&lt;img src="STLCRev3.5_files/figure-html/punctureHD-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Russet vs storage days
+
+&lt;img src="STLCRev3.5_files/figure-html/russet-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Russet vs harvest day 
+
+&lt;img src="STLCRev3.5_files/figure-html/russetHD-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Sunburn vs storage days
+
+&lt;img src="STLCRev3.5_files/figure-html/sunburn-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Sunburn vs harvest day
+
+&lt;img src="STLCRev3.5_files/figure-html/sunburnHD-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Shrivel vs storage days
+
+&lt;img src="STLCRev3.5_files/figure-html/Shrivel-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Shrivel vs harvest day
+
+&lt;img src="STLCRev3.5_files/figure-html/ShrivelHD-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Stem end browning vs storage days
+
+&lt;img src="STLCRev3.5_files/figure-html/stemEndBrowning-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Stem end browning vs harvest day
+
+&lt;img src="STLCRev3.5_files/figure-html/stemEndBrowningHD-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Model development 
+
+- using poisson GLM regression (best suited to count/proportional data)
+- tested a number of covariates - harvest date and ESP were the most influential
+- significant interactions were observed between storage days and ESP (as expected)
+
+&lt;font size="3"&gt;$$log(E[DQ_i|SD_i,HD_j, ESP_k]) = \beta_0 + \beta_1SD_i + \beta_2HD_j + \beta_3ESP_k + \beta_4SD_iESP_k + log(SQ_i)$$&lt;/font&gt;
+
+where:  
+
+`\(E[DQ_i|SD_i,HD_j, ESP_k]\)` = expected value of defect quantity given `\(i^{th}\)` storage day, `\(j^{th}\)` harvest day and `\(k^{th}\)` value of submission profile (ESP)  
+`\(SQ_i\)` = `\(i^{th}\)` value of sample quantity  
+`\(\beta_{0...4}\)` = regression coefficients  
+
+The above equation can be reformulated into the more usable form:  
+
+&lt;font size="3"&gt;$$\frac{E[DQ_i|SD_i,HD_j, ESP_k]}{SQ_i} = e^{\beta_0 + \beta_1SD_i + \beta_2HD_j + \beta_3ESP_k + \beta_4SD_iESP_k}$$&lt;/font&gt;
+
+---
+
+## Regression results 
+
+.pull-left[
+#### Storage days as single predictor variable
+
+&lt;table class=" lightable-classic-2 table" style='font-family: "Arial Narrow", "Source Sans Pro", sans-serif; margin-left: auto; margin-right: auto; width: auto !important; margin-left: auto; margin-right: auto;'&gt;
+ &lt;thead&gt;
+  &lt;tr&gt;
+   &lt;th style="text-align:left;"&gt; term &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; estimate &lt;/th&gt;
+   &lt;th style="text-align:center;"&gt; p-value &lt;/th&gt;
+  &lt;/tr&gt;
+ &lt;/thead&gt;
+&lt;tbody&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; (Intercept) &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; -2.3467 &lt;/td&gt;
+   &lt;td style="text-align:center;"&gt; p&amp;lt;0.001 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; storageDays &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.0050 &lt;/td&gt;
+   &lt;td style="text-align:center;"&gt; p&amp;lt;0.001 &lt;/td&gt;
+  &lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+]
+
+.pull-right[
+
+#### Storage days, harvest day &amp; ESP as covariates
+
+&lt;table class=" lightable-classic-2 table" style='font-family: "Arial Narrow", "Source Sans Pro", sans-serif; margin-left: auto; margin-right: auto; width: auto !important; margin-left: auto; margin-right: auto;'&gt;
+ &lt;thead&gt;
+  &lt;tr&gt;
+   &lt;th style="text-align:left;"&gt; term &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; estimate &lt;/th&gt;
+   &lt;th style="text-align:center;"&gt; p-value &lt;/th&gt;
+  &lt;/tr&gt;
+ &lt;/thead&gt;
+&lt;tbody&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; (Intercept) &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; -2.7052 &lt;/td&gt;
+   &lt;td style="text-align:center;"&gt; p&amp;lt;0.001 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; storageDays &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.0061 &lt;/td&gt;
+   &lt;td style="text-align:center;"&gt; p&amp;lt;0.001 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; harvestDay &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.0035 &lt;/td&gt;
+   &lt;td style="text-align:center;"&gt; p=0.030 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; MaturityCodeB &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.2461 &lt;/td&gt;
+   &lt;td style="text-align:center;"&gt; p=0.002 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; MaturityCodeC &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; 0.7661 &lt;/td&gt;
+   &lt;td style="text-align:center;"&gt; p&amp;lt;0.001 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; storageDays:MaturityCodeB &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; -0.0033 &lt;/td&gt;
+   &lt;td style="text-align:center;"&gt; p&amp;lt;0.001 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; storageDays:MaturityCodeC &lt;/td&gt;
+   &lt;td style="text-align:right;"&gt; -0.0103 &lt;/td&gt;
+   &lt;td style="text-align:center;"&gt; p&amp;lt;0.001 &lt;/td&gt;
+  &lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+]
+
+---
+
+## Key Assumptions for model
+
+- Storage will never improve the condition of the fruit
+- Storage loss at day zero is zero
+- Defects such as "colour", "undersize", "oversize", "export fruit", "elongated", "hail" etc are independent of storage time
+- aggregate storage loss is the sum of the relevant individual defect loss curves i.e. 
+
+`$$LF_i = \sum_{n=1}^k e^{(\beta_{0n} + \beta_{1n}SD_i)}$$`
+
+Where:  
+
+`\(LF_i\)` = loss function for the `\(i^{th}\)` storage day    
+`\(k\)` = number of defects in the defect set  
+`\(\beta\)` = average regression coefficient of the last four years losses  
+
+---
+
+## Defects contributing to storage loss 
+
+&lt;table class=" lightable-classic-2 table" style='font-family: "Arial Narrow", "Source Sans Pro", sans-serif; margin-left: auto; margin-right: auto; width: auto !important; margin-left: auto; margin-right: auto;'&gt;
+ &lt;thead&gt;
+  &lt;tr&gt;
+   &lt;th style="text-align:left;"&gt; defect &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; `\(e^{\beta_1}\)` &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; `\(e^{\beta_0}\)` &lt;/th&gt;
+   &lt;th style="text-align:right;"&gt; `\(e^{\hat{\beta_1}}\)` &lt;/th&gt;
+  &lt;/tr&gt;
+ &lt;/thead&gt;
+&lt;tbody&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Bruise (OLD) &lt;/td&gt;
+   &lt;td style="text-align:right;width: 5em; "&gt; 1.003 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 5em; "&gt; 0.148 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 5em; "&gt; 1.003 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Puncture &lt;/td&gt;
+   &lt;td style="text-align:right;width: 5em; "&gt; 1.001 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 5em; "&gt; 0.127 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 5em; "&gt; 1.001 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Cuts &lt;/td&gt;
+   &lt;td style="text-align:right;width: 5em; "&gt; 0.998 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 5em; "&gt; 0.056 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 5em; "&gt; 1.000 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Bruise (fresh) &lt;/td&gt;
+   &lt;td style="text-align:right;width: 5em; "&gt; 1.001 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 5em; "&gt; 0.037 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 5em; "&gt; 1.001 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Stem Split &lt;/td&gt;
+   &lt;td style="text-align:right;width: 5em; "&gt; 0.996 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 5em; "&gt; 0.044 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 5em; "&gt; 1.000 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Shrivel &lt;/td&gt;
+   &lt;td style="text-align:right;width: 5em; "&gt; 1.014 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 5em; "&gt; 0.002 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 5em; "&gt; 1.014 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Blemish Cosmetic &lt;/td&gt;
+   &lt;td style="text-align:right;width: 5em; "&gt; 0.993 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 5em; "&gt; 0.031 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 5em; "&gt; 1.000 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Lenticle Spot &lt;/td&gt;
+   &lt;td style="text-align:right;width: 5em; "&gt; 1.008 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 5em; "&gt; 0.012 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 5em; "&gt; 1.008 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;"&gt; Stem end browning &lt;/td&gt;
+   &lt;td style="text-align:right;width: 5em; "&gt; 1.008 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 5em; "&gt; 0.003 &lt;/td&gt;
+   &lt;td style="text-align:right;width: 5em; "&gt; 1.008 &lt;/td&gt;
+  &lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+
+---
+
+## Aggregate loss curve
+
+&lt;img src="STLCRev3.5_files/figure-html/lossCurve-1.png" width="70%" style="display: block; margin: auto;" /&gt;
+---
+
+## Conclusion
+
+- Defect-by-defect approach to estimating storage loss was described in this presentation
+- The relationship of each defect was examined with respect to storage days and harvest date for the last five years
+- The defects were then classified as directly, indirectly or independent of time in storage.
+- Each defect proportion was then modeled using Poisson GLM regression. . The last three years data were average to establish a mean initial rate and mean growth rate for each defect
+- An aggregate loss curve was then formulated giving a total loss due to storage of 2.3% of the mass of fruit packed after 150 days.
+- The aim is to refine the model with additional years data to establish a robust loss curve that can be used to compensate growers for fruit quality loss in storage.
+
+---
+
+class: inverse-custom
+
+# Appendices
+### Historical defect summaries by storage days and harvest date
+
+---
+
+## Stem tear vs storage day
+
+&lt;img src="STLCRev3.5_files/figure-html/stem_tear-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Stem tear vs harvest day
+
+&lt;img src="STLCRev3.5_files/figure-html/stem_tearHD-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Tree damage vs storage days
+
+&lt;img src="STLCRev3.5_files/figure-html/tree_damage-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Tree damage vs harvest day
+
+&lt;img src="STLCRev3.5_files/figure-html/tree_damageHD-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Hail vs storage days
+
+&lt;img src="STLCRev3.5_files/figure-html/hail-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Hail vs harvest day
+
+&lt;img src="STLCRev3.5_files/figure-html/hailHD-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Insect damage vs storage days
+
+&lt;img src="STLCRev3.5_files/figure-html/insectDamage-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Insect damage vs harvest day
+
+&lt;img src="STLCRev3.5_files/figure-html/insectDamageHD-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Cuts vs storage days
+
+&lt;img src="STLCRev3.5_files/figure-html/cuts-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Cuts vs harvest day
+
+&lt;img src="STLCRev3.5_files/figure-html/cutsHD-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Fresh bruise vs storage days
+
+&lt;img src="STLCRev3.5_files/figure-html/freshBruise-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Fresh bruise vs harvest day
+
+&lt;img src="STLCRev3.5_files/figure-html/freshBruiseHD-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Low colour vs storage days
+
+&lt;img src="STLCRev3.5_files/figure-html/lowColour-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Low colour vs harvest day
+
+&lt;img src="STLCRev3.5_files/figure-html/lowColourHD-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Undersize vs storage days
+
+&lt;img src="STLCRev3.5_files/figure-html/underSize-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Undersize vs harvest day
+
+&lt;img src="STLCRev3.5_files/figure-html/underSizeHD-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Stem split vs storage days
+
+&lt;img src="STLCRev3.5_files/figure-html/stemSplit-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Stem split vs harvest day
+
+&lt;img src="STLCRev3.5_files/figure-html/stemSplitHD-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Export fruit vs storage days
+
+&lt;img src="STLCRev3.5_files/figure-html/exportFruit-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Export fruit vs harvest day
+
+&lt;img src="STLCRev3.5_files/figure-html/exportFruitHD-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Misshapen vs storage days
+
+&lt;img src="STLCRev3.5_files/figure-html/MissShapen-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Misshapen vs harvest day
+
+&lt;img src="STLCRev3.5_files/figure-html/MissShapenHD-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Blemish cosmetic vs storage days
+
+&lt;img src="STLCRev3.5_files/figure-html/blemishCosmetic-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Blemish cosmetic vs harvest day
+
+&lt;img src="STLCRev3.5_files/figure-html/blemishCosmeticHD-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Lenticle Spot vs storage days
+
+&lt;img src="STLCRev3.5_files/figure-html/lenticleSpot-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Lenticle Spot vs harvest day
+
+&lt;img src="STLCRev3.5_files/figure-html/lenticleSpotHD-1.png" width="75%" style="display: block; margin: auto;" /&gt;
+
+---
+    </textarea>
+<style data-target="print-only">@media screen {.remark-slide-container{display:block;}.remark-slide-scaler{box-shadow:none;}}</style>
+<script src="https://remarkjs.com/downloads/remark-latest.min.js"></script>
+<script>var slideshow = remark.create({
+"slideNumberFormat": "%current%",
+"highlightStyle": "github",
+"highlightLines": true,
+"ratio": "16:9",
+"countIncrementalSlides": true
+});
+if (window.HTMLWidgets) slideshow.on('afterShowSlide', function (slide) {
+  window.dispatchEvent(new Event('resize'));
+});
+(function(d) {
+  var s = d.createElement("style"), r = d.querySelector(".remark-slide-scaler");
+  if (!r) return;
+  s.type = "text/css"; s.innerHTML = "@page {size: " + r.style.width + " " + r.style.height +"; }";
+  d.head.appendChild(s);
+})(document);
+
+(function(d) {
+  var el = d.getElementsByClassName("remark-slides-area");
+  if (!el) return;
+  var slide, slides = slideshow.getSlides(), els = el[0].children;
+  for (var i = 1; i < slides.length; i++) {
+    slide = slides[i];
+    if (slide.properties.continued === "true" || slide.properties.count === "false") {
+      els[i - 1].className += ' has-continuation';
+    }
+  }
+  var s = d.createElement("style");
+  s.type = "text/css"; s.innerHTML = "@media print { .has-continuation { display: none; } }";
+  d.head.appendChild(s);
+})(document);
+// delete the temporary CSS (for displaying all slides initially) when the user
+// starts to view slides
+(function() {
+  var deleted = false;
+  slideshow.on('beforeShowSlide', function(slide) {
+    if (deleted) return;
+    var sheets = document.styleSheets, node;
+    for (var i = 0; i < sheets.length; i++) {
+      node = sheets[i].ownerNode;
+      if (node.dataset["target"] !== "print-only") continue;
+      node.parentNode.removeChild(node);
+    }
+    deleted = true;
+  });
+})();
+// add `data-at-shortcutkeys` attribute to <body> to resolve conflicts with JAWS
+// screen reader (see PR #262)
+(function(d) {
+  let res = {};
+  d.querySelectorAll('.remark-help-content table tr').forEach(tr => {
+    const t = tr.querySelector('td:nth-child(2)').innerText;
+    tr.querySelectorAll('td:first-child .key').forEach(key => {
+      const k = key.innerText;
+      if (/^[a-z]$/.test(k)) res[k] = t;  // must be a single letter (key)
+    });
+  });
+  d.body.setAttribute('data-at-shortcutkeys', JSON.stringify(res));
+})(document);
+(function() {
+  "use strict"
+  // Replace <script> tags in slides area to make them executable
+  var scripts = document.querySelectorAll(
+    '.remark-slides-area .remark-slide-container script'
+  );
+  if (!scripts.length) return;
+  for (var i = 0; i < scripts.length; i++) {
+    var s = document.createElement('script');
+    var code = document.createTextNode(scripts[i].textContent);
+    s.appendChild(code);
+    var scriptAttrs = scripts[i].attributes;
+    for (var j = 0; j < scriptAttrs.length; j++) {
+      s.setAttribute(scriptAttrs[j].name, scriptAttrs[j].value);
+    }
+    scripts[i].parentElement.replaceChild(s, scripts[i]);
+  }
+})();
+(function() {
+  var links = document.getElementsByTagName('a');
+  for (var i = 0; i < links.length; i++) {
+    if (/^(https?:)?\/\//.test(links[i].getAttribute('href'))) {
+      links[i].target = '_blank';
+    }
+  }
+})();
+// adds .remark-code-has-line-highlighted class to <pre> parent elements
+// of code chunks containing highlighted lines with class .remark-code-line-highlighted
+(function(d) {
+  const hlines = d.querySelectorAll('.remark-code-line-highlighted');
+  const preParents = [];
+  const findPreParent = function(line, p = 0) {
+    if (p > 1) return null; // traverse up no further than grandparent
+    const el = line.parentElement;
+    return el.tagName === "PRE" ? el : findPreParent(el, ++p);
+  };
+
+  for (let line of hlines) {
+    let pre = findPreParent(line);
+    if (pre && !preParents.includes(pre)) preParents.push(pre);
+  }
+  preParents.forEach(p => p.classList.add("remark-code-has-line-highlighted"));
+})(document);</script>
+
+<script>
+slideshow._releaseMath = function(el) {
+  var i, text, code, codes = el.getElementsByTagName('code');
+  for (i = 0; i < codes.length;) {
+    code = codes[i];
+    if (code.parentNode.tagName !== 'PRE' && code.childElementCount === 0) {
+      text = code.textContent;
+      if (/^\\\((.|\s)+\\\)$/.test(text) || /^\\\[(.|\s)+\\\]$/.test(text) ||
+          /^\$\$(.|\s)+\$\$$/.test(text) ||
+          /^\\begin\{([^}]+)\}(.|\s)+\\end\{[^}]+\}$/.test(text)) {
+        code.outerHTML = code.innerHTML;  // remove <code></code>
+        continue;
+      }
+    }
+    i++;
+  }
+};
+slideshow._releaseMath(document);
+</script>
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+(function () {
+  var script = document.createElement('script');
+  script.type = 'text/javascript';
+  script.src  = 'https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-MML-AM_CHTML';
+  if (location.protocol !== 'file:' && /^https?:/.test(script.src))
+    script.src  = script.src.replace(/^https?:/, '');
+  document.getElementsByTagName('head')[0].appendChild(script);
+})();
+</script>
+  </body>
+</html>

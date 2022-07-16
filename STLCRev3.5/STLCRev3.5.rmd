@@ -1,0 +1,1435 @@
+---
+title: "Storage Loss Compensation"
+subtitle: "Analysis and recommendations"  
+author: 
+  - "Stuart Dykes"
+date: '`r Sys.Date()`'
+output:
+  xaringan::moon_reader:
+    css: rockit_style.css
+    nature:
+      slideNumberFormat: "%current%"
+      highlightStyle: github
+      highlightLines: true
+      ratio: 16:9
+      countIncrementalSlides: true
+    seal: false
+---
+
+class: title-slide-custom
+
+# Storage Loss
+## Analysis and recomendations
+### Stuart Dykes
+#### `r Sys.Date()`
+
+---
+
+```{r setup, include=FALSE}
+options(htmltools.dir.version = FALSE)
+knitr::opts_chunk$set(
+  fig.width=9, fig.height=3.5, fig.retina=3,
+  out.width = "100%",
+  cache = FALSE,
+  echo = FALSE,
+  message = FALSE, 
+  warning = FALSE,
+  hiline = TRUE
+)
+```
+
+```{r xaringan-logo, echo=FALSE}
+xaringanExtra::use_logo(
+  image_url = "images/Rockit5.png",
+  position = xaringanExtra::css_position(bottom = "-90px", right = "20px"),
+  exclude_class = c("title-slide-custom", "inverse-custom", "hide_logo")
+)
+```
+
+## Introduction 
+
+- Need to find a fair method of compensating growers for actual storage loss
+- Problem is complex and multi-factorial
+- Previous attempts to use gross-loss have tended to also capture loss not related to storage
+- Current approach is to analyse each defect/disorder in terms of trajectory during storage time
+- The effect of ESP and Harvest Date specifically have been accounted for in the model
+
+---
+
+```{r rSetup, echo=FALSE}
+library(tidyverse)
+library(tidymodels)
+library(knitr)
+library(odbc)
+library(DBI)
+library(kableExtra)
+library(ggthemes)
+library(lubridate)
+library(rgl)
+```
+
+
+```{r dataGathering, echo = FALSE, warning=FALSE, message=FALSE}
+#=======================fitrst the 2020 - 2022 data ==============================================
+con <- dbConnect(odbc(),    
+                 Driver = "ODBC Driver 17 for SQL Server", #"SQLServer", #
+                 Server = "abcrepldb.database.windows.net",  
+                 Database = "ABCPackerRepl",   
+                 UID = "abcadmin",   
+                 PWD = "Trauts2018!",
+                 Port = 1433
+)
+#
+# the juice fruit is now being put through the Bin_Delivery table with PresizeProdutID = 278
+#
+juiceFruitKgs <- tbl(con, "ma_Bin_DeliveryT") %>%
+  filter(PresizeProductID == 278) %>%
+  group_by(PresizeOutputFromGraderBatchID) %>% #this is the GraderBatchID
+  summarise(juiceKgs = sum(TotalWeight, na.rm=T),
+            .groups = "drop") %>%
+  rename(GraderBatchID = PresizeOutputFromGraderBatchID) %>%
+  collect()
+#
+# Sample fruit is the undersize and oversize fruit and the sample fruit also.
+#
+sampleFruitKgs <- left_join(tbl(con, "ma_Pallet_DetailT"), 
+                            tbl(con, "sw_ProductT"), by = "ProductID") %>%
+  filter(SampleFlag == 1) %>%
+  group_by(GraderBatchID) %>%
+  summarise(sampleKgs = sum(NoOfUnits*NetFruitWeight, na.rm=T)) %>%
+  collect()
+#
+# Lastly the WasteOtherKgs makes up the rejectKgs.  Also the compac reconciliation 
+# hence the negative numbers in some cases
+#
+GraderBatchT <- left_join(tbl(con, "ma_Grader_BatchT"),
+                          tbl(con, "sw_FarmT") %>% select(c(FarmID, FarmCode, FarmName)), 
+                          by = "FarmID") %>%
+  left_join(tbl(con, "sw_Farm_BlockT") %>% select(c(BlockID, BlockCode, BlockName)), by ="BlockID") %>%
+  left_join(tbl(con, "sw_MaturityT") %>% select(c(MaturityID, MaturityCode)), by = "MaturityID") %>%
+  left_join(tbl(con, "sw_CompanyT") %>% select(c(CompanyID, CompanyName)), by = c("GrowerCompanyID" = "CompanyID")) %>%
+  rename(owner = CompanyName) %>%
+  select(c(GraderBatchID,
+           GraderBatchNo,
+           SeasonID,
+           PackDate,
+           InputKgs,
+           ShiftID,
+           GraderLineID,
+           WasteOtherKgs,
+           PresizeInputFlag,
+           StorageTypeID,
+           HarvestDate,
+           PickNoID,
+           FarmCode,
+           FarmName,
+           BlockCode,
+           BlockName,
+           owner,
+           MaturityCode)) %>%
+  collect()
+#
+# looseKgs calculation
+#
+looseFruitKgs1 <- inner_join(tbl(con, "ma_Export_Bin_DetailT"),
+                             tbl(con, "ma_Pallet_DetailT") %>% select(c(PalletDetailID, GraderBatchID)),
+                             by = "PalletDetailID") %>%
+  group_by(GraderBatchID) %>%
+  summarise(looseKgs = sum(KGWeight, na.rm=T)) %>%
+  collect()
+
+looseFruitKgs <- left_join(tbl(con, "ma_Pallet_DetailT"),
+                           left_join(tbl(con, "sw_ProductT"),
+                                     left_join(tbl(con, "sw_GradeT"),
+                                               tbl(con, "sys_fi_Pool_TypeT"),
+                                               by = "PoolTypeID") %>% 
+                                       select(c(GradeID, GradeDesc, PoolByRule)),
+                                     by = "GradeID"),
+                           by = "ProductID") %>%
+  left_join(tbl(con, "ma_Export_Bin_DetailT"), by = "PalletDetailID") %>%
+  collect() %>%
+  filter(PoolByRule == "KG",
+         is.na(ExportBinDetailID),
+         GradeDesc != "Push Pack") %>%
+  mutate(looseKgs = NoOfUnits*NetFruitWeight) %>%
+  select(c(GraderBatchID, looseKgs)) %>%
+  bind_rows(looseFruitKgs1) %>%
+  group_by(GraderBatchID) %>%
+  summarise(looseKgs = sum(looseKgs, na.rm=T),
+            .groups = "drop") 
+#
+#
+#
+defect_assessments <- left_join(tbl(con,"qa_Assessment_DefectT") %>% 
+                                      select(c(AssessmentDefectID, AssessmentID, DefectID, DefectQty)),
+                                tbl(con, "qa_AssessmentT") %>%
+                                  select(c(AssessmentID, GraderBatchID, BlockID, TemplateID, FarmID, GradeID, SampleQty, SeasonID)),
+                                by = "AssessmentID") %>%
+  left_join(tbl(con, "qa_TemplateT") %>% select(c(TemplateID, TemplateName)), 
+            by = "TemplateID") %>%
+  left_join(tbl(con, "qa_DefectT") %>% select(c(DefectID, Defect)),
+            by = "DefectID") %>%
+  filter(TemplateName %in% c("Grade Analysis", "Packer Rejects", "Defect Sorter Rejects", "Class 1.5 Analysis")) %>%
+  collect()
+
+sampleQty <- tbl(con, "qa_AssessmentT") %>%
+  filter(!is.null(GraderBatchID),
+         TemplateID %in% c(8,13,14,18)) %>%
+  group_by(SeasonID, GraderBatchID) %>%
+  summarise(sampleQty = sum(SampleQty, na.rm=T)) %>%
+  collect()
+
+bin_qty <- tbl(con, "ma_Bin_UsageT") %>%
+  collect() %>%
+  select(GraderBatchID, BinQty) %>%
+  group_by(GraderBatchID) %>%
+  summarise(fieldBinsTipped = sum(BinQty, na.rm=T)) 
+
+binsHarvested <- tbl(con, "ma_Bin_DeliveryT") %>%
+  select(-c(BinTypeID,
+            BinDeliveryNo,
+            VarietyID,
+            HoldReasonID,
+            TotalWeight,
+            PresizeProductID,
+            PresizeOutputFromGraderBatchID,
+            PresizeOutputFromGraderBatchMPILotID,
+            LastAction,
+            CreatedByUserName,
+            CreatedDateTime,
+            TimeStamp,
+            AverageBrix,
+            AverageFirmness,
+            RTESizeMatrixID,
+            EstimatedRTEsPerBin)) %>%
+  left_join(tbl(con, "sw_Farm_BlockT") %>% select(BlockID, BlockCode, BlockName), 
+            by="BlockID") %>%
+  left_join(tbl(con, "sw_FarmT") %>% select(FarmID, FarmCode, FarmName), 
+            by = "FarmID") %>%
+  left_join(tbl(con, "sw_Storage_TypeT") %>% select(c(StorageTypeID, StorageTypeDesc)), 
+            by = "StorageTypeID") %>%
+  left_join(tbl(con, "sw_Pick_NoT") %>% select(c(PickNoID, PickNoDesc)),
+            by = "PickNoID") %>%
+  left_join(tbl(con, "sw_TreatmentT") %>% select(c(TreatmentID, TreatmentDesc)),
+            by = "TreatmentID") %>%
+  left_join(tbl(con, "sw_TagT") %>% select(c(TagID, TagDesc)),
+            by = "TagID") %>%
+  left_join(tbl(con, "sw_Growing_TypeT") %>% select(c(GrowingTypeID, GrowingTypeDesc)),
+            by = "GrowingTypeID") %>%
+  left_join(tbl(con, "sw_CompanyT") %>% select(c(CompanyID, CompanyName)),
+            by = c("FirstStorageSiteCompanyID" = "CompanyID")) %>%
+  left_join(tbl(con, "sw_MaturityT") %>% select(c(MaturityID, MaturityCode)),
+            by = "MaturityID") %>%
+  select(-c(FarmID, 
+            BlockID, 
+            StorageTypeID, 
+            PickNoID, 
+            TreatmentID, 
+            TagID, 
+            GrowingTypeID,
+            FirstStorageSiteCompanyID,
+            MaturityID)) %>%
+  filter(PresizeFlag == 0) %>%
+  collect()
+
+dbDisconnect(con)
+
+graderBatchData <- left_join(GraderBatchT, juiceFruitKgs,
+                             by = "GraderBatchID") %>%
+  left_join(sampleFruitKgs, by="GraderBatchID") %>%
+  left_join(looseFruitKgs, by = "GraderBatchID") %>%
+  mutate(across(.cols = c(juiceKgs, sampleKgs, looseKgs), ~replace_na(.x,0))) %>% 
+  left_join(bin_qty, by = "GraderBatchID") %>%
+  filter(!is.na(WasteOtherKgs),
+         PresizeInputFlag == 0) %>%
+  mutate(InputKgs = InputKgs,
+         rejectKgs = WasteOtherKgs + juiceKgs + sampleKgs + looseKgs, 
+         GraderBatchNo = as.integer(GraderBatchNo),
+         packOut = 1-rejectKgs/InputKgs,
+         storageDays = as.numeric(PackDate - HarvestDate),
+         StorageType = case_when(
+           StorageTypeID == 4 ~ "CA",
+           StorageTypeID == 7 ~ "RA",
+           TRUE ~ "RA"),
+         Season = case_when(
+           SeasonID == 6 ~ 2020,
+           SeasonID == 7 ~ 2021,
+           TRUE ~ 2022)) %>%
+  mutate(owner = str_trim(owner, side = "both"),
+         owner = str_to_lower(owner),
+         owner = str_replace_all(owner, " ", "")) %>%
+  mutate(ifelse(storageDays < 50 & StorageType == "CA", "RA", "RA")) %>%
+  select(GraderBatchID, 
+         GraderBatchNo,
+         Season,
+         owner,
+         FarmCode,
+         FarmName, 
+         BlockCode,
+         HarvestDate,
+         PackDate,
+         storageDays,
+         fieldBinsTipped,
+         InputKgs, 
+         rejectKgs, 
+         packOut,
+         MaturityCode,
+         StorageType)
+
+#===================================2018/2019 Data==============================================
+
+con <- dbConnect(odbc(),    
+                 Driver = "ODBC Driver 17 for SQL Server", #"SQLServer", #
+                 Server = "abcrepldb.database.windows.net",  
+                 Database = "ABCPackRepl",   
+                 UID = "abcadmin",   
+                 PWD = "Trauts2018!",
+                 Port = 1433
+)
+
+GraderBatchT2019 <- left_join(tbl(con, "ma_Grader_BatchT"),
+                          tbl(con, "sw_FarmT") %>% select(c(FarmID, FarmCode, FarmName)), 
+                          by = "FarmID") %>%
+  select(c(GraderBatchID,
+           GraderBatchNo,
+           SeasonID,
+           PackDate,
+           InputKgs,
+           RejectKgs,
+           FarmCode,
+           FarmName)) %>%
+  collect()
+
+Bins2019 <- tbl(con, "ma_Bin_UsageT") %>%
+  group_by(GraderBatchID) %>%
+  summarise(BinID = max(BinID, na.rm=T),
+            BinQty = sum(BinQty, na.rm=T),
+            .groups = "drop") %>%
+  left_join(tbl(con, "ma_BinT") %>% 
+              select(c(BinID, SeasonID, FarmID, BlockID, NoOfBins, HarvestDate,
+                       StorageTypeID, PresizeFlag, FirstStorageSiteCompanyID, ESPID)),
+            by = "BinID")%>%
+  left_join(tbl(con, "sw_Farm_BlockT") %>% select(c(BlockID, BlockCode, BlockName)),
+            by = "BlockID") %>%
+  left_join(tbl(con, "sw_Storage_TypeT") %>% select(c(StorageTypeID, StorageTypeDesc)),
+            by = "StorageTypeID") %>%
+  left_join(tbl(con, "sw_CompanyT") %>% select(c(CompanyID, CompanyName)),
+            by = c("FirstStorageSiteCompanyID" = "CompanyID")) %>%
+  left_join(tbl(con, "sw_ESPT") %>% select(c(ESPID, ESPCode)),
+            by = "ESPID") %>%
+  select(-c(FarmID, BlockID, StorageTypeID, FirstStorageSiteCompanyID, ESPID )) %>%
+  arrange(GraderBatchID) %>%
+  collect()
+
+defect_assessments2019 <- left_join(tbl(con,"qa_Assessment_DefectT") %>% 
+                                      select(c(AssessmentDefectID, AssessmentID, DefectID, DefectQty)),
+                                tbl(con, "qa_AssessmentT") %>%
+                                  select(c(AssessmentID, GraderBatchID, BlockID, TemplateID, 
+                                           FarmID, GradeID, SampleQty, SeasonID)),
+                                by = "AssessmentID") %>%
+  left_join(tbl(con, "qa_TemplateT") %>% select(c(TemplateID, TemplateName)), 
+            by = "TemplateID") %>%
+  left_join(tbl(con, "qa_DefectT") %>% select(c(DefectID, Defect)),
+            by = "DefectID") %>%
+  filter(TemplateName %in% c("Grade Analysis", "Packer Rejects", "Defect Sorter Rejects")) %>%
+  collect()
+
+sampleQty2019 <- tbl(con, "qa_AssessmentT") %>%
+  filter(!is.null(GraderBatchID),
+         TemplateID %in% c(16,18)) %>%
+  group_by(SeasonID, GraderBatchID) %>%
+  summarise(sampleQty = sum(SampleQty, na.rm=T)) %>%
+  collect()
+
+dbDisconnect(con)
+
+graderBatchData2019 <- GraderBatchT2019 %>%
+  left_join(Bins2019 %>% filter(!is.na(GraderBatchID)) %>%
+              select(-c(SeasonID, BinID)), 
+            by = "GraderBatchID") %>%
+  filter(SeasonID %in% c(4,5)) %>%
+  rename(rejectKgs = RejectKgs) %>%
+  mutate(Season = case_when(SeasonID == 4 ~ 2018,
+                            SeasonID == 5 ~ 2019,
+                            TRUE ~ 0),
+         StorageType = case_when(StorageTypeDesc == "Normal Air" ~ "RA",
+                                 StorageTypeDesc == "CA & Smartfreshed" ~ "CA",
+                                 TRUE ~ "RA"),
+         packOut = 1-rejectKgs/InputKgs,
+         GraderBatchNo = as.integer(GraderBatchNo)) %>%
+  select(-c(SeasonID,StorageTypeDesc)) %>%
+  rename(MaturityCode = ESPCode)
+
+
+sq <- sampleQty2019 %>%
+  bind_rows(sampleQty) %>%
+  filter(SeasonID %in% c(4,5,6,7,8))
+
+defAss <- defect_assessments2019 %>%
+  bind_rows(defect_assessments) %>%
+  filter(SeasonID %in% c(4,5,6,7,8))
+
+gbd <- graderBatchData2019 %>%
+  select(c(GraderBatchID,
+         GraderBatchNo,
+         Season,
+         FarmName,
+         BlockCode,
+         InputKgs,
+         rejectKgs,
+         packOut,
+         StorageType)) %>%
+  bind_rows(graderBatchData %>% select(c(GraderBatchID,
+                                         GraderBatchNo,
+                                         Season,
+                                         FarmName,
+                                         BlockCode,
+                                         InputKgs,
+                                         rejectKgs,
+                                         packOut,
+                                         StorageType))) %>%
+  filter(Season %in% c(2018, 2019, 2020, 2021, 2022))
+  
+            
+
+da <- defAss %>%
+  group_by(SeasonID, GraderBatchID, Defect) %>%
+  summarise(defectQty = sum(DefectQty),
+            .groups = "drop") %>%
+  left_join(sq, by=c("SeasonID", "GraderBatchID")) %>%
+  mutate(Season = case_when(SeasonID == 4 ~ 2018,
+                            SeasonID == 5 ~ 2019,
+                            SeasonID == 6 ~ 2020,
+                            SeasonID == 7 ~ 2021,
+                            TRUE ~ 2022)) %>%
+  left_join(gbd, by = c("Season", "GraderBatchID")) %>%
+  mutate(proportion = (1-packOut)*defectQty/sampleQty,
+         Defect = ifelse(Defect == "Russet Cheek" | Defect == "Russet Stem", "Russet", Defect)) %>%
+  filter(!is.na(FarmName))
+
+```
+
+## Extent of storage days 
+
+```{r storagedays, echo=FALSE}
+packout_tidy <- graderBatchData2019 %>%
+  select(c(GraderBatchID,
+           Season,
+           PackDate,
+           HarvestDate,
+           BinQty,
+           InputKgs,
+           rejectKgs,
+           packOut,
+           MaturityCode,
+           StorageType)) %>%
+  mutate(storageDays = as.integer(PackDate - HarvestDate)) %>%
+  rename(fieldBinsTipped = BinQty) %>%
+  bind_rows(graderBatchData %>%
+              select(c(GraderBatchID,
+                       Season,
+                       PackDate,
+                       HarvestDate,
+                       fieldBinsTipped,
+                       InputKgs,
+                       rejectKgs,
+                       packOut,
+                       MaturityCode,
+                       StorageType,
+                       storageDays))) %>%
+  mutate(StorageType = ifelse(storageDays < 20 & StorageType == "CA", "RA", StorageType))
+
+Apd <- packout_tidy %>%
+  filter(StorageType == "CA") %>%
+  group_by(Season) %>%
+  nest() %>%
+  mutate(CAstartDate = map(data, ~min(.$PackDate)),
+         CAendDate = map(data, ~max(.$PackDate)),
+         minstorageDays = map(data, ~min(.$storageDays))) %>%
+  unnest(c(CAstartDate, CAendDate, minstorageDays)) %>%
+  mutate(CAPackingDays = as.integer(CAendDate - CAstartDate)) %>%
+  select(-data)
+
+packout_tidy %>%
+  group_by(Season) %>%
+  summarise(packingStartDate = min(PackDate, na.rm=T)) %>%
+  inner_join(Apd, by = "Season") %>%
+  mutate(daysToCA = as.integer(CAstartDate - packingStartDate)) %>%
+  #select(c(Season, packingStartDate)) %>%
+  kable(caption = "Summary of Rockit storage 2018 - 2022 (YTD)", 
+        col.names = c("season", "packing start", "first CA", "last CA", "CA min storage days", "CA packing days", "packing start to first CA"),
+        escape=T,
+        booktabs = T, 
+        align=c("l", rep("r",6)),
+        linesep = "") %>%
+  kable_classic_2() %>%
+  kable_styling(full_width=F) %>%
+  column_spec(1, width = "2em") %>%
+  column_spec(2:4, width = "9em") %>%
+  column_spec(5:7, width = "4em")
+```
+
+---
+
+## Pack-out performance 
+
+```{r packoutTable, echo=F}
+meanPackout <- graderBatchData2019 %>%
+  group_by(Season, StorageType) %>%
+  summarise(InputKgs = sum(InputKgs, na.rm=T),
+            rejectKgs = sum(rejectKgs, na.em=T),
+            .groups = "drop") %>%
+  mutate(packOut = 1-rejectKgs/InputKgs) %>%
+  bind_rows(graderBatchData %>%
+              group_by(Season, StorageType) %>%
+              summarise(InputKgs = sum(InputKgs, na.rm=T),
+                        rejectKgs = sum(rejectKgs, na.em=T),
+                        .groups = "drop") %>%
+              mutate(packOut = 1-rejectKgs/InputKgs)) %>%
+  select(-c(InputKgs, rejectKgs)) %>%
+  pivot_wider(names_from = StorageType, values_from = packOut) 
+  
+
+meanPackout %>%
+  mutate(meanUplift = scales::percent(CA - RA, accuracy = 0.01),
+         CA = scales::percent(CA, accuracy = 0.01),
+         RA = scales::percent(RA, accuracy = 0.01)) %>%
+  kable(col.names = c("season", "CA", "RA", "mean uplift"),
+        escape=T,
+        booktabs = T, 
+        align=c("l", rep("r",3)),
+        linesep = "") %>%
+  kable_classic_2() %>%
+  add_header_above(c("", "pack-out" = 3)) %>%
+  kable_styling(full_width=F) %>%
+  column_spec(1, width = "2em") %>%
+  column_spec(2:3, width = "4em") %>%
+  column_spec(4, width = "4em")
+```
+
+---
+
+## Calculated uplift 
+
+```{r formulated table, echo = FALSE}
+PackoutnonLinear <- packout_tidy %>%
+  filter(StorageType == "RA",
+         !is.na(packOut))
+   
+
+thetaCalc <- packout_tidy %>%
+  group_by(Season) %>%
+  slice_min(packOut, prop=0.5) %>%
+  summarise(theta = mean(packOut, na.rm=T),
+            .groups = "drop")
+
+npl <- left_join(PackoutnonLinear, thetaCalc, by="Season") %>%
+  group_by(Season) %>%
+  nest()
+
+nlp_table <- PackoutnonLinear %>%
+  group_by(Season) %>%
+  nest() %>%
+  mutate(model = map(data, function(df) nls(packOut ~ alpha *exp(beta * storageDays) + 
+                                              theta, data=df, start=list(alpha=20, beta=-.05, theta=70))),
+         tidied = map(model, tidy)) %>%
+  unnest(tidied) %>%
+  select(-c(std.error, statistic, p.value)) %>%
+  pivot_wider(names_from = term, values_from = estimate) %>%
+  select(-c(data, model))
+
+PackoutLinear <- packout_tidy %>%
+  filter(StorageType == "CA",
+         !is.na(HarvestDate)) 
+
+lp_table <- PackoutLinear %>%
+  group_by(Season) %>%
+  nest() %>%
+  mutate(model = map(data, ~lm(packOut ~ storageDays, data=.)),
+         tidied = map(model, tidy)) %>%
+  unnest(tidied) %>%
+  select(-c(std.error, statistic, p.value)) %>%
+  pivot_wider(names_from = term, values_from = estimate) %>%
+  select(-c(data, model, `(Intercept)`)) %>%
+  rename(slope = storageDays) %>%
+  mutate(slope = slope*100) %>%
+  ungroup()
+
+full_table <- nlp_table %>%
+  bind_cols(lp_table %>% select(slope)) %>%
+  bind_cols(meanPackout %>% select(CA)) %>%
+  mutate(actualUplift = CA - theta) 
+
+full_table %>%
+  mutate(alpha = scales::percent(alpha, accuracy = 0.01),
+         theta = scales::percent(theta, accuracy = 0.01),
+         slope = scales::percent(slope, accuracy = 0.01),
+         beta = round(beta, 3),
+         CA = round(CA, 3),
+         actualUplift = scales::percent(actualUplift, accuracy = 0.01)) %>%
+  kable(col.names = c("season", "$\\alpha$","$\\beta$", "$\\theta$", "$m$", "$\\mu$", "uplift"),
+        align=c("l", rep("r", 6)),
+        escape = T,
+        booktabs=T,
+        linesep="") %>%
+  kable_classic_2() %>%
+  kable_styling(full_width=F) %>%
+  add_header_above(c(" ", "RA" = 3, "CA" = 2, " ")) %>%
+  add_header_above(c(" ", "regression coefficients" = 5, " ")) %>%
+  footnote(alphabet = c("$m$ = slope in pack-out % per day. Note the none of the slopes were significant meaning that the hypothesis that the slopes are all zero (i.e. CA PO is constant) cannot be rejected\n","$\\mu$ = the mean packout for all the CA batches from that season\n","uplift = actual uplift, calculated as mean CA packout ($\\mu$) - $\\theta$"),
+           escape = T,
+           footnote_as_chunk = T,
+           threeparttable = TRUE) %>%
+  column_spec(1, width = "1em") %>%
+  column_spec(2:6, width = "3em") %>%
+  column_spec(7, width = "3em")
+
+           
+```
+
+---
+
+## Pack-out behaviour 
+
+.pull-left[
+
+```{r packoutPlot, echo=F, warning=F, out.width='90%',fig.asp=1.1,  fig.align='center'}
+
+#============================================plot===============================================
+  
+prediction_values_non_linear <- PackoutnonLinear %>%
+  group_by(Season) %>%
+  nest() %>%
+  mutate(model = map(data, ~nls(packOut ~ alpha *exp(beta * storageDays) + 
+                                              theta, data=., 
+                                start=list(alpha=20, beta=-.05, theta=70))),
+         packOut = map(model, ~tibble(predict(.)))) %>%
+  select(-model) %>%
+  unnest(c(data, packOut)) %>%
+  rename(predPackOut = `predict(.)`)
+
+prediction_values_linear <- PackoutLinear %>%
+  filter(!(Season == 2022 & StorageType == 'CA')) %>%
+  group_by(Season) %>%
+  nest() %>%
+  mutate(model = map(data, ~lm(packOut ~ storageDays, data=.)),
+         packOut = map(model, ~tibble(predict(.)))) %>%
+  select(-model) %>%
+  unnest(c(data, packOut)) %>%
+  rename(predPackOut = `predict(.)`)
+
+packout_tidy %>%
+  filter(!(Season == 2022 & StorageType == 'CA')) %>%
+  ggplot(aes(x=storageDays, y=packOut, colour=StorageType)) +
+  geom_jitter(alpha = 0.4) +
+  geom_line(data = prediction_values_non_linear, aes(x = storageDays, y = predPackOut), size=1) +
+  geom_line(data = prediction_values_linear, aes(x = storageDays, y = predPackOut), size=1) +
+  facet_wrap(vars(Season), ncol=1) +
+  theme_economist() + scale_colour_economist() +
+  theme(axis.title.x = element_text(margin = margin(t = 10)),
+        axis.title.y = element_text(margin = margin(r = 10)),
+        axis.text.y = element_text(size = 6, hjust=1),
+        axis.text.x = element_text(size = 9),
+        legend.text = element_text(size = 10)) +
+  scale_y_continuous("pack-out", labels = scales::label_percent(accuracy = 1.0))
+```
+]
+
+.pull-right[
+
+### Modeled pack-out 
+
+The pack-out can be modeled using a first order rate equation of the form
+
+$$E[PO_i|SD_i] = {\alpha}e^{{\beta}SD_i} + \theta$$  
+
+where:  
+
+$E[PO_i|SD_i]$ = conditional estimate of pack-out given the $i^{th}$ storage day    
+$\alpha$ = constant, $\alpha + \theta$ = initial pack-out at storage day zero  
+$\beta$ = regression coefficient (rate constant)  
+$\theta$ =  "steady state" pack-out  
+]
+---
+
+## Examination of individual defects
+
+- Curves above are the aggregation of individual defects
+- Approach then is to examine the behaviour of individual defects as a function of storage time and storage type (i.e. RA or CA)
+- Defects fall into three categories: directly related to storage, indirectly related to storage and independent of storage
+- Shrivel is directly related to time in storage, undersize is independent, old bruising appears to be indirectly related.
+
+---
+
+## Classification of defects 
+
+```{r defectClassTable, echo = FALSE}
+
+defects <- read.csv("defects2.csv") 
+defects2 <- read.csv("defectsTable.csv") 
+
+independent <- defects2 %>%
+  filter(Category == "independent") %>%
+  pull(Defect)
+
+independentCont <- defects2 %>%
+  filter(Category == "independentContinued") %>%
+  pull(Defect)
+  
+indirect <- defects2 %>%
+  filter(Category == "indirect",
+         Defect != "Glomerella  (Bitter Rot)") %>%
+  pull(Defect)
+
+indirectCont <- defects2 %>%
+  filter(Category == "indirectContinued",
+         Defect != "Glomerella  (Bitter Rot)") %>%
+  pull(Defect)
+
+direct <- defects2 %>%
+  filter(Category == "direct") %>%
+  pull(Defect)
+
+tibble(direct = c(direct, rep(NA, length(indirectCont) - length(direct))), 
+       indirect = c(indirect, rep(NA, length(indirectCont) - length(indirect))),
+       `indirect continued` = indirectCont,
+       independent = c(independent, rep(NA, length(indirectCont)-length(independent))),
+       `independent continued` = c(independentCont, rep(NA, length(indirectCont)-length(independentCont)))) %>%
+  mutate(across(.cols = everything(), ~replace_na(., ""))) %>%
+  kable(col.names = c("direct", "indirect", "indirect cont'd", "independent", "independent cont'd"),
+        align=c(rep("l",5)),
+        escape = T,
+        booktabs=T,
+        linesep="") %>%
+  kable_styling(full_width=T, font_size = 10) 
+  
+
+```
+
+
+
+
+---
+
+## Old Bruising vs storage days
+
+```{r old bruising, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+
+defectPlot1 <- function(defect) {
+  da_summary <- graderBatchData2019 %>% 
+    mutate(storageDays = as.integer(PackDate - HarvestDate)) %>%
+    select(c(Season, GraderBatchID, storageDays, HarvestDate, MaturityCode, StorageType)) %>%
+    bind_rows(graderBatchData %>% select(c(Season, GraderBatchID, storageDays, 
+                                           HarvestDate, MaturityCode, StorageType))) %>%
+    left_join(da %>% mutate(Defect = ifelse(Defect == "Bruise (Old)", "Bruise (OLD)", Defect)) %>% 
+                filter(Defect == {{defect}}) %>%
+                select(-c(StorageType, SeasonID)),
+              by = c("Season", "GraderBatchID")) %>%
+    mutate(across(.cols = "Defect", ~ replace_na(.,{{defect}})),
+           across(.cols = c("defectQty", "sampleQty"), ~ replace_na(.,0)),
+           MaturityCode = case_when(MaturityCode == "D" ~ "C",
+                                    MaturityCode == "X" ~ "C",
+                                    TRUE ~ as.character(MaturityCode))) %>%
+    select(c(Season, GraderBatchID, storageDays, HarvestDate, 
+             defectQty, sampleQty, MaturityCode, StorageType)) %>%
+    filter(!is.na(MaturityCode)) %>%
+    group_by(Season, storageDays, MaturityCode, StorageType) %>%
+    summarise(defectQty = sum(defectQty, na.rm=T),
+              sampleQty = sum(sampleQty, na.rm=T),
+              .groups = "drop") %>%
+    mutate(proportion = defectQty/(sampleQty+1),
+           StorageType = ifelse(storageDays < 20 & StorageType == "CA", "RA", StorageType))
+
+  testRA <- da_summary %>%
+    filter(StorageType == "RA") %>%
+    group_by(Season) %>%
+    nest() %>%
+    mutate(model = map(data, ~glm(defectQty ~ storageDays, offset=log(sampleQty+1), 
+                                family="quasipoisson", data=.) %>% fitted.values)) %>%
+    unnest(c(data, model)) %>%
+    mutate(fittedValues = model/(sampleQty + 1)) 
+
+  testCA <- da_summary %>%
+    filter(Season != 2022, 
+           StorageType == "CA") %>%
+    group_by(Season) %>%
+    nest() %>%
+    mutate(model = map(data, ~glm(defectQty ~ storageDays, offset=log(sampleQty+1), 
+                                family="quasipoisson", data=.) %>% fitted.values)) %>%
+    unnest(c(data, model)) %>%
+    mutate(fittedValues = model/(sampleQty + 1)) 
+
+testRA %>%
+  bind_rows(testCA) %>%
+  ggplot(aes(storageDays, proportion, colour = StorageType)) +
+  geom_jitter() +
+  geom_line(aes(y = fittedValues), size=1) +
+  facet_wrap(vars(Season), ncol = 3) +
+  theme_economist() + scale_colour_economist() +
+  theme(axis.title.x = element_text(margin = margin(t = 10)),
+        axis.title.y = element_text(margin = margin(r = 10)),
+        plot.title = element_text(vjust = 2)) +
+  scale_y_continuous("percentage of defects / %", labels = scales::label_percent(accuracy = 1.0)) +
+  labs(title =paste0("Trajectory of ", defect, " defects with storage days"),
+       subtitle = "for RA & CA, 2018-2022 (YTD) inclusive",
+       x = "storage days")
+}
+
+defectPlot1("Bruise (OLD)")
+```
+
+---
+
+## Old Bruising vs harvest day
+
+```{r oldBruisingHD, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+
+defectPlot2 <- function(defect) {
+  da_summary <- graderBatchData2019 %>% 
+    mutate(storageDays = as.integer(PackDate - HarvestDate),
+           harvestDay = yday(HarvestDate)) %>%
+    select(c(Season, GraderBatchID, storageDays, HarvestDate, harvestDay, MaturityCode, StorageType)) %>%
+    bind_rows(graderBatchData %>% 
+                mutate(harvestDay = yday(HarvestDate)) %>%
+                select(c(Season, GraderBatchID, storageDays,
+                         HarvestDate, harvestDay, MaturityCode, StorageType))) %>%
+    left_join(da %>% mutate(Defect = ifelse(Defect == "Bruise (Old)", "Bruise (OLD)", Defect)) %>% 
+                filter(Defect == {{defect}}) %>%
+                select(-c(StorageType, SeasonID)),
+              by = c("Season", "GraderBatchID")) %>%
+    mutate(across(.cols = "Defect", ~ replace_na(.,{{defect}})),
+           across(.cols = c("defectQty", "sampleQty"), ~ replace_na(.,0)),
+           MaturityCode = case_when(MaturityCode == "D" ~ "C",
+                                    MaturityCode == "X" ~ "C",
+                                    TRUE ~ as.character(MaturityCode))) %>%
+    select(c(Season, GraderBatchID, storageDays, HarvestDate, harvestDay,
+             defectQty, sampleQty, MaturityCode, StorageType)) %>%
+    filter(!is.na(MaturityCode)) %>%
+    group_by(Season, storageDays, harvestDay, MaturityCode, StorageType) %>%
+    summarise(defectQty = sum(defectQty, na.rm=T),
+              sampleQty = sum(sampleQty, na.rm=T),
+              .groups = "drop") %>%
+    mutate(proportion = defectQty/(sampleQty+1),
+           StorageType = ifelse(storageDays < 20 & StorageType == "CA", "RA", StorageType))
+  
+  testRA <- da_summary %>%
+    filter(StorageType == "RA") %>%
+    group_by(Season) %>%
+    nest() %>%
+    mutate(model = map(data, ~lm(proportion ~ harvestDay, data=.) %>% fitted.values)) %>%
+    unnest(c(data, model)) 
+  
+  testCA <- da_summary %>%
+    filter(Season != 2022, 
+           StorageType == "CA") %>%
+    group_by(Season) %>%
+    nest() %>%
+    mutate(model = map(data, ~lm(proportion ~ harvestDay, data=.) %>% fitted.values)) %>%
+    unnest(c(data, model))
+    
+  
+  testRA %>%
+    bind_rows(testCA) %>%
+    ggplot(aes(harvestDay, proportion, colour = StorageType)) +
+    geom_jitter(alpha = 0.5) +
+    geom_line(aes(y = model), size=1) +
+    facet_wrap(vars(Season)) +
+    theme_economist() + scale_colour_economist() +
+    theme(axis.title.x = element_text(margin = margin(t = 10)),
+          axis.title.y = element_text(margin = margin(r = 10)),
+          plot.title = element_text(vjust = 2),
+          plot.background = element_rect(fill="#76c0c1")) +
+    scale_y_continuous("percentage of defects / %", labels = scales::label_percent(accuracy = 1.0)) +
+    labs(title =paste0("Trajectory of ",defect," defects with harvest day"),
+         subtitle = "for RA & CA, 2018-2022 (YTD) inclusive",
+         x = "harvest day (No of days from January 1st)")
+}
+
+defectPlot2("Bruise (OLD)")
+```
+
+---
+
+## Puncture vs storage days
+
+```{r puncture, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot1("Puncture")
+```
+
+---
+
+## Puncture vs harvest day
+
+```{r punctureHD, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot2("Puncture")
+```
+
+---
+
+## Russet vs storage days
+
+```{r russet, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot1("Russet")
+```
+
+---
+
+## Russet vs harvest day 
+
+```{r russetHD, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot2("Russet")
+```
+
+---
+
+## Sunburn vs storage days
+
+```{r sunburn, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot1("Sunburn")
+```
+
+---
+
+## Sunburn vs harvest day
+
+```{r sunburnHD, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot2("Sunburn")
+```
+
+---
+
+## Shrivel vs storage days
+
+```{r Shrivel, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot1("Shrivel")
+```
+
+---
+
+## Shrivel vs harvest day
+
+```{r ShrivelHD, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot2("Shrivel")
+```
+
+---
+
+## Stem end browning vs storage days
+
+```{r stemEndBrowning, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot1("Stem end browning")
+```
+
+---
+
+## Stem end browning vs harvest day
+
+```{r stemEndBrowningHD, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot2("Stem end browning")
+```
+
+---
+
+## Model development 
+
+- using poisson GLM regression (best suited to count/proportional data)
+- tested a number of covariates - harvest date and ESP were the most influential
+- significant interactions were observed between storage days and ESP (as expected)
+
+<font size="3">$$log(E[DQ_i|SD_i,HD_j, ESP_k]) = \beta_0 + \beta_1SD_i + \beta_2HD_j + \beta_3ESP_k + \beta_4SD_iESP_k + log(SQ_i)$$</font>
+
+where:  
+
+$E[DQ_i|SD_i,HD_j, ESP_k]$ = expected value of defect quantity given $i^{th}$ storage day, $j^{th}$ harvest day and $k^{th}$ value of submission profile (ESP)  
+$SQ_i$ = $i^{th}$ value of sample quantity  
+$\beta_{0...4}$ = regression coefficients  
+
+The above equation can be reformulated into the more usable form:  
+
+<font size="3">$$\frac{E[DQ_i|SD_i,HD_j, ESP_k]}{SQ_i} = e^{\beta_0 + \beta_1SD_i + \beta_2HD_j + \beta_3ESP_k + \beta_4SD_iESP_k}$$</font>
+
+---
+
+## Regression results 
+
+.pull-left[
+#### Storage days as single predictor variable
+
+```{r SVregressionOutput, echo=FALSE}
+da_Shrivel <- graderBatchData2019 %>% 
+  mutate(storageDays = as.integer(PackDate - HarvestDate),
+         harvestDay = yday(HarvestDate)) %>%
+  select(c(Season, GraderBatchID, storageDays, HarvestDate, harvestDay, MaturityCode, StorageType)) %>%
+  bind_rows(graderBatchData %>% 
+              mutate(harvestDay = yday(HarvestDate)) %>%
+              select(c(Season, GraderBatchID, storageDays, 
+                                         HarvestDate, harvestDay, MaturityCode, StorageType))) %>%
+  left_join(da %>% mutate(Defect = ifelse(Defect == "Bruise (Old)", "Bruise (OLD)", Defect)) %>% 
+              filter(Defect == "Bruise (OLD)") %>%
+              select(-c(StorageType, SeasonID)),
+            by = c("Season", "GraderBatchID")) %>%
+  mutate(across(.cols = "Defect", ~ replace_na(.,"Bruise (OLD)")),
+         across(.cols = c("defectQty", "sampleQty"), ~ replace_na(.,0)),
+         MaturityCode = case_when(MaturityCode == "D" ~ "C",
+                                  MaturityCode == "X" ~ "C",
+                                  TRUE ~ as.character(MaturityCode))) %>%
+  select(c(Season, GraderBatchID, storageDays, HarvestDate, harvestDay, defectQty, sampleQty, MaturityCode, StorageType)) %>%
+  filter(!is.na(MaturityCode)) %>%
+  group_by(Season, storageDays, harvestDay, MaturityCode, StorageType) %>%
+  summarise(defectQty = sum(defectQty, na.rm=T),
+            sampleQty = sum(sampleQty, na.rm=T),
+            .groups = "drop") %>%
+  mutate(proportion = defectQty/(sampleQty+1),
+         StorageType = ifelse(storageDays < 20 & StorageType == "CA", "RA", StorageType)) %>%
+  filter(Season == 2021,
+         StorageType == "RA")
+
+model <- glm(defectQty ~ storageDays, offset=log(sampleQty+1), family="quasipoisson", data=da_Shrivel)
+
+tidy(model) %>% select(c(term, estimate, p.value)) %>%
+  mutate(estimate = round(estimate, 4),
+         p.value = scales::pvalue(p.value, accuracy = 0.001, add_p = T)) %>%
+  kable(col.names = c("term", "estimate", "p-value"),
+        escape=T,
+        booktabs = T, 
+        align=c("l", "r", "c"),
+        linesep = "") %>%
+  kable_classic_2() %>%
+  kable_styling(full_width=F) 
+  
+```
+]
+
+.pull-right[
+
+#### Storage days, harvest day & ESP as covariates
+
+```{r MVregressionOutput, echo=FALSE}
+da_Shrivel <- graderBatchData2019 %>% 
+  mutate(storageDays = as.integer(PackDate - HarvestDate),
+         harvestDay = yday(HarvestDate)) %>%
+  select(c(Season, GraderBatchID, storageDays, HarvestDate, harvestDay, MaturityCode, StorageType)) %>%
+  bind_rows(graderBatchData %>% 
+              mutate(harvestDay = yday(HarvestDate)) %>%
+              select(c(Season, GraderBatchID, storageDays, 
+                                         HarvestDate, harvestDay, MaturityCode, StorageType))) %>%
+  left_join(da %>% mutate(Defect = ifelse(Defect == "Bruise (Old)", "Bruise (OLD)", Defect)) %>% 
+              filter(Defect == "Bruise (OLD)") %>%
+              select(-c(StorageType, SeasonID)),
+            by = c("Season", "GraderBatchID")) %>%
+  mutate(across(.cols = "Defect", ~ replace_na(.,"Bruise (OLD)")),
+         across(.cols = c("defectQty", "sampleQty"), ~ replace_na(.,0)),
+         MaturityCode = case_when(MaturityCode == "D" ~ "C",
+                                  MaturityCode == "X" ~ "C",
+                                  TRUE ~ as.character(MaturityCode))) %>%
+  select(c(Season, GraderBatchID, storageDays, HarvestDate, harvestDay, defectQty, sampleQty, MaturityCode, StorageType)) %>%
+  filter(!is.na(MaturityCode)) %>%
+  group_by(Season, storageDays, harvestDay, MaturityCode, StorageType) %>%
+  summarise(defectQty = sum(defectQty, na.rm=T),
+            sampleQty = sum(sampleQty, na.rm=T),
+            .groups = "drop") %>%
+  mutate(proportion = defectQty/(sampleQty+1),
+         StorageType = ifelse(storageDays < 20 & StorageType == "CA", "RA", StorageType)) %>%
+  filter(Season == 2021,
+         StorageType == "RA")
+
+model <- glm(defectQty ~ storageDays + harvestDay + MaturityCode + storageDays:MaturityCode,
+                 offset=log(sampleQty+1), family="quasipoisson", data=da_Shrivel)
+
+tidy(model) %>% select(c(term, estimate, p.value)) %>%
+  mutate(estimate = round(estimate, 4),
+         p.value = scales::pvalue(p.value, accuracy = 0.001, add_p = T)) %>%
+  kable(col.names = c("term", "estimate", "p-value"),
+        escape=T,
+        booktabs = T, 
+        align=c("l", "r", "c"),
+        linesep = "") %>%
+  kable_classic_2() %>%
+  kable_styling(full_width=F) 
+  
+```
+]
+
+---
+
+## Key Assumptions for model
+
+- Storage will never improve the condition of the fruit
+- Storage loss at day zero is zero
+- Defects such as "colour", "undersize", "oversize", "export fruit", "elongated", "hail" etc are independent of storage time
+- aggregate storage loss is the sum of the relevant individual defect loss curves i.e. 
+
+$$LF_i = \sum_{n=1}^k e^{(\beta_{0n} + \beta_{1n}SD_i)}$$
+
+Where:  
+
+$LF_i$ = loss function for the $i^{th}$ storage day    
+$k$ = number of defects in the defect set  
+$\beta$ = average regression coefficient of the last four years losses  
+
+---
+
+## Defects contributing to storage loss 
+
+```{r lossCurveTable, echo=F, warning=F}
+
+packOut <- graderBatchData %>%
+  filter(Season > 2018 & Season < 2022) %>%
+  summarise(InputKgs = sum(InputKgs, na.rm=T),
+            rejectKgs = sum(rejectKgs, na.rm=T)) %>%
+  mutate(packOut = 1-rejectKgs/InputKgs)
+
+top_23 <- da %>%
+  filter(SeasonID > 4) %>%
+  select(-packOut) %>%
+  group_by(Defect) %>%
+  summarise(defectQty = sum(defectQty, na.rm=T),
+            sampleQty = sum(sampleQty, na.rm=T)) %>%
+  mutate(DefectProportion = (1-packOut[[3]])*defectQty/sampleQty) %>%
+  select(-c(defectQty, sampleQty)) %>%
+  ungroup() %>%
+  arrange(desc(DefectProportion)) %>%
+  head(., 23) %>%
+  left_join(defects, by = "Defect") %>%
+  filter(!Category == "independent",
+         !Defect %in% c("WHITE ROT", "Rot (Botrytis)")) %>%
+  pull(Defect) %>%
+  fct_inorder()
+
+#==========================================functionlibrary============================================
+
+glmf <- function(da_master, def) {
+  seasons <- distinct(da_master, Season)
+  da_master %>%
+    filter(Defect == def) %>%
+    split(.$Season) %>%
+    map(~glm(defectQty ~ storageDays + harvestDay + MaturityCode + storageDays:MaturityCode, offset=log(sampleQty+1), 
+             family="quasipoisson", data=.)) %>%
+    map_dfr(~.$coefficients) %>%
+    bind_cols(seasons) %>%
+    mutate(Defect = def)
+}
+
+glmf2 <- function(da_master, def) {
+  seasons <- distinct(da_master, Season)
+  da_master %>%
+    filter(Defect == def) %>%
+    split(.$Season) %>%
+    map(~glm(defectQty ~ storageDays, offset=log(sampleQty+1), 
+             family="quasipoisson", data=.)) %>%
+    map_dfr(~.$coefficients) %>%
+    bind_cols(seasons) %>%
+    mutate(Defect = def)
+}
+
+SD <- function(Defect, corrMeanIntercept, corrMeanEstimate, ...) {
+  tibble(storageDays = seq(0,150,1)) %>%
+    mutate(fittedValue = exp(corrMeanIntercept + corrMeanEstimate*storageDays),
+           DefectName = !!enquo(Defect))
+}
+
+#=======================================================================================================
+
+da_storage <- graderBatchData2019 %>% 
+  mutate(storageDays = as.integer(PackDate - HarvestDate),
+         harvestDay = yday(HarvestDate)) %>%
+  select(c(Season, GraderBatchID, storageDays, HarvestDate, harvestDay, MaturityCode, StorageType)) %>%
+  bind_rows(graderBatchData %>% 
+              mutate(harvestDay = yday(HarvestDate)) %>%
+              select(c(Season, GraderBatchID, storageDays, HarvestDate, harvestDay, MaturityCode, StorageType))) %>%
+  left_join(da %>% mutate(Defect = ifelse(Defect == "Bruise (Old)", "Bruise (OLD)", Defect)) %>% 
+              filter(Defect %in% top_23) %>%
+              select(-c(StorageType, SeasonID)),
+            by = c("Season", "GraderBatchID")) %>%
+  mutate(StorageType = if_else(StorageType == "CA" & storageDays < 15, "RA", StorageType)) %>%
+  filter(StorageType == "RA",
+         Season > 2018 & Season < 2022,
+         !is.na(Defect),
+         !is.na(packOut)) 
+
+meanInt <- top_23 %>%
+  map(~glmf2(da_storage, .)) %>%
+  map_dbl(~mean(.$`(Intercept)`)) %>%
+  as_tibble_col(., column_name = "meanIntercept") 
+
+meanEst <- top_23 %>%
+  map(~glmf(da_storage, .)) %>%
+  map_dbl(~mean(.$storageDays)) %>%
+  as_tibble_col(., column_name = "meanEstimate") %>%
+  bind_cols(meanInt) %>%
+  bind_cols(as_tibble_col(top_23, column_name="Defect")) %>%
+  mutate(corrMeanEstimate = if_else(meanEstimate < 0.0, 0.0, meanEstimate),
+         corrMeanIntercept = case_when(meanEstimate < 0.0 ~ -100,
+                                      TRUE ~ meanIntercept), 
+         corrMeanIntercept = if_else(corrMeanIntercept > -3, -3, corrMeanIntercept)
+         ) %>%
+  relocate(Defect, .before = meanEstimate) %>%
+  ungroup()
+
+meanEst %>%
+  select(c(Defect, meanEstimate, meanIntercept, corrMeanEstimate)) %>%
+  mutate(meanEstimate = exp(meanEstimate), 
+         meanIntercept = exp(meanIntercept),
+         corrMeanEstimate = exp(corrMeanEstimate)) %>%
+  mutate(across(.cols = meanEstimate:corrMeanEstimate, ~ round(., 3))) %>%
+  kable(col.names = c("defect", "$e^{\\beta_1}$", "$e^{\\beta_0}$", "$e^{\\hat{\\beta_1}}$"),
+        escape=T,
+        booktabs = T, 
+        align=c("l", rep("r", 4)),
+        linesep = "") %>%
+  kable_classic_2() %>%
+  kable_styling(full_width=F) %>%
+  column_spec(2:4, width = "5em")
+```
+
+---
+
+## Aggregate loss curve
+
+```{r lossCurve, echo=F, warning=F, out.width='70%',fig.asp=0.7,  fig.align='center'}
+
+AggLossCurve <- meanEst %>%
+  pmap_df(SD) %>%
+  mutate(fittedValue = fittedValue*(1-packOut[[3]])) %>%
+  pivot_wider(names_from = DefectName, values_from = fittedValue) %>%
+  rowwise() %>%
+  mutate(aggLoss = sum(c_across(`Bruise (OLD)`:`Stem end browning`)))
+
+corr <- AggLossCurve$aggLoss[[1]]
+         
+corrAggLossCurve <- AggLossCurve %>%
+  mutate(corrAggLoss = aggLoss - corr)
+
+corrAggLossCurve %>%
+  ggplot(aes(x=storageDays, y=corrAggLoss)) +
+  geom_line(size = 1) +
+  scale_y_continuous("Percentage loss due to storage", labels = scales::label_percent(accuracy = 0.1)) +
+  labs(x="storage days")
+```
+---
+
+## Conclusion
+
+- Defect-by-defect approach to estimating storage loss was described in this presentation
+- The relationship of each defect was examined with respect to storage days and harvest date for the last five years
+- The defects were then classified as directly, indirectly or independent of time in storage.
+- Each defect proportion was then modeled using Poisson GLM regression. . The last three years data were average to establish a mean initial rate and mean growth rate for each defect
+- An aggregate loss curve was then formulated giving a total loss due to storage of 2.3% of the mass of fruit packed after 150 days.
+- The aim is to refine the model with additional years data to establish a robust loss curve that can be used to compensate growers for fruit quality loss in storage.
+
+---
+
+class: inverse-custom
+
+# Appendices
+### Historical defect summaries by storage days and harvest date
+
+---
+
+## Stem tear vs storage day
+
+```{r stem_tear, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot1("Stem Tear")
+```
+
+---
+
+## Stem tear vs harvest day
+
+```{r stem_tearHD, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot2("Stem Tear")
+```
+
+---
+
+## Tree damage vs storage days
+
+```{r tree_damage, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot1("Tree Damage")
+```
+
+---
+
+## Tree damage vs harvest day
+
+```{r tree_damageHD, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot2("Tree Damage")
+```
+
+---
+
+## Hail vs storage days
+
+```{r hail, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot1("Hail")
+```
+
+---
+
+## Hail vs harvest day
+
+```{r hailHD, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot2("Hail")
+```
+
+---
+
+## Insect damage vs storage days
+
+```{r insectDamage, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot1("Insect Damage")
+```
+
+---
+
+## Insect damage vs harvest day
+
+```{r insectDamageHD, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot2("Insect Damage")
+```
+
+---
+
+## Cuts vs storage days
+
+```{r cuts, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot1("Cuts")
+```
+
+---
+
+## Cuts vs harvest day
+
+```{r cutsHD, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot2("Cuts")
+```
+
+---
+
+## Fresh bruise vs storage days
+
+```{r freshBruise, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot1("Bruise (fresh)")
+```
+
+---
+
+## Fresh bruise vs harvest day
+
+```{r freshBruiseHD, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot2("Bruise (fresh)")
+```
+
+---
+
+## Low colour vs storage days
+
+```{r lowColour, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot1("Low Colour")
+```
+
+---
+
+## Low colour vs harvest day
+
+```{r lowColourHD, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot2("Low Colour")
+```
+
+---
+
+## Undersize vs storage days
+
+```{r underSize, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot1("Under Size")
+```
+
+---
+
+## Undersize vs harvest day
+
+```{r underSizeHD, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot2("Under Size")
+```
+
+---
+
+## Stem split vs storage days
+
+```{r stemSplit, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot1("Stem Split")
+```
+
+---
+
+## Stem split vs harvest day
+
+```{r stemSplitHD, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot2("Stem Split")
+```
+
+---
+
+## Export fruit vs storage days
+
+```{r exportFruit, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot1("Export fruit")
+```
+
+---
+
+## Export fruit vs harvest day
+
+```{r exportFruitHD, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot2("Export fruit")
+```
+
+---
+
+## Misshapen vs storage days
+
+```{r MissShapen, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot1("Misshapen")
+```
+
+---
+
+## Misshapen vs harvest day
+
+```{r MissShapenHD, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot2("Misshapen")
+```
+
+---
+
+## Blemish cosmetic vs storage days
+
+```{r blemishCosmetic, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot1("Blemish Cosmetic")
+```
+
+---
+
+## Blemish cosmetic vs harvest day
+
+```{r blemishCosmeticHD, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot2("Blemish Cosmetic")
+```
+
+---
+
+## Lenticle Spot vs storage days
+
+```{r lenticleSpot, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot1("Lenticle Spot")
+```
+
+---
+
+## Lenticle Spot vs harvest day
+
+```{r lenticleSpotHD, echo=F, warning=F, out.width='75%',fig.asp=0.6,  fig.align='center'}
+defectPlot2("Lenticle Spot")
+```
+
+---
